@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>水火箭發射模擬器</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+            background-color: #f0fdf4; /* 淺綠/藍背景 */
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* 自訂拉桿樣式 */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 16px;
+            width: 16px;
+            border-radius: 50%;
+            background: #0ea5e9;
+            cursor: pointer;
+            margin-top: -6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%;
+            height: 4px;
+            cursor: pointer;
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+        input[type=range]:focus {
+            outline: none;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f5f9; 
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #94a3b8; 
+            border-radius: 3px;
+        }
+        /* 新增支援手機瀏覽器真實高度，避免網址列遮擋 */
+        .h-dvh {
+            height: 100vh;
+            height: 100dvh;
+        }
+    </style>
+</head>
+<body class="h-dvh w-screen overflow-hidden flex flex-col md:flex-row text-sm md:text-base">
+
+    <!-- 左側/上方：模擬器視窗 -->
+    <div class="relative w-full h-[45%] shrink-0 md:h-full md:w-2/3 bg-sky-100 overflow-hidden" id="canvas-container">
+        <!-- 背景裝飾 -->
+        <div class="absolute top-2 left-2 md:top-4 md:left-4 text-sky-800 font-bold text-lg md:text-xl opacity-50 select-none">
+            🚀 虛擬試飛場
+        </div>
+        
+        <canvas id="simCanvas"></canvas>
+
+        <!-- 實時數據浮窗 -->
+        <div class="absolute top-2 right-2 md:top-4 md:right-4 bg-white/80 backdrop-blur-sm p-2 md:p-4 rounded-lg md:rounded-xl shadow-lg border border-white text-xs md:text-sm">
+            <h3 class="font-bold text-gray-800 mb-1 md:mb-2 border-b pb-1">飛行數據</h3>
+            <div class="flex justify-between gap-2 md:gap-4 mb-1">
+                <span class="font-mono text-blue-600"><span id="curr-height">0.0</span> m</span>
+            </div>
+            <div class="flex justify-between gap-4 mb-1">
+                <span class="text-gray-600">當前距離:</span>
+                <span class="font-mono text-blue-600"><span id="curr-dist">0.0</span> m</span>
+            </div>
+            <div class="flex justify-between gap-4 mb-1">
+                <span class="text-gray-600">最高高度:</span>
+                <span class="font-mono text-red-500 font-bold"><span id="max-height">0.0</span> m</span>
+            </div>
+            <div class="flex justify-between gap-4">
+                <span class="text-gray-600">最遠射程:</span>
+                <span class="font-mono text-purple-600 font-bold"><span id="max-dist">0.0</span> m</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右側/下方：控制台與原理說明 -->
+    <div class="w-full h-[55%] md:h-full md:w-1/3 bg-white shadow-[-4px_0_15px_rgba(0,0,0,0.05)] flex flex-col z-10">
+        
+        <!-- 標籤頁切換 -->
+        <div class="flex border-b border-gray-200 shrink-0">
+            <button onclick="switchTab('control')" id="tab-control" class="flex-1 py-3 md:py-4 font-bold text-blue-600 border-b-2 border-blue-600 bg-blue-50/50 transition-colors text-sm md:text-base">
+                🎛️ 發射控制台
+            </button>
+            <button onclick="switchTab('theory')" id="tab-theory" class="flex-1 py-3 md:py-4 font-bold text-gray-500 hover:bg-gray-50 transition-colors text-sm md:text-base">
+                📚 科學原理
+            </button>
+            <button onclick="showShareModal()" class="px-3 md:px-4 py-3 md:py-4 font-bold text-green-600 hover:bg-green-50 transition-colors border-l border-gray-200 text-sm md:text-base" title="分享此模擬器">
+                🔗 分享
+            </button>
+        </div>
+
+        <!-- 內容區 -->
+        <div class="flex-1 overflow-y-auto p-4 md:p-6 custom-scrollbar relative">
+            
+            <!-- 發射控制台 -->
+            <div id="content-control" class="space-y-4 md:space-y-6 block pb-8 md:pb-0">
+                
+                <!-- 水壓 -->
+                <div>
+                    <label class="flex justify-between text-sm font-bold text-gray-700 mb-1">
+                        <span>💨 瓶內水壓 (PSI)</span>
+                        <span id="val-pressure" class="text-blue-600 font-mono">60</span>
+                    </label>
+                    <input type="range" id="input-pressure" min="20" max="120" step="5" value="60" oninput="updateVal('pressure')">
+                    <p class="text-xs text-gray-400 mt-1">影響推力大小</p>
+                </div>
+
+                <!-- 發射角度 -->
+                <div>
+                    <label class="flex justify-between text-sm font-bold text-gray-700 mb-1">
+                        <span>📐 發射角度 (度)</span>
+                        <span id="val-angle" class="text-blue-600 font-mono">45</span>
+                    </label>
+                    <input type="range" id="input-angle" min="0" max="90" step="1" value="45" oninput="updateVal('angle')">
+                    <p class="text-xs text-gray-400 mt-1">影響飛行拋物線軌跡</p>
+                </div>
+
+                <!-- 水量 -->
+                <div>
+                    <label class="flex justify-between text-sm font-bold text-gray-700 mb-1">
+                        <span>💧 裝水量 (公升)</span>
+                        <span id="val-water" class="text-blue-600 font-mono">0.6</span>
+                    </label>
+                    <input type="range" id="input-water" min="0.1" max="1.8" step="0.1" value="0.6" oninput="updateVal('water')">
+                    <p class="text-xs text-gray-400 mt-1">以 2L 寶特瓶為基準，影響反作用力質量</p>
+                </div>
+
+                <!-- 機身重量 -->
+                <div>
+                    <label class="flex justify-between text-sm font-bold text-gray-700 mb-1">
+                        <span>⚖️ 空機重量 (公斤)</span>
+                        <span id="val-weight" class="text-blue-600 font-mono">0.15</span>
+                    </label>
+                    <input type="range" id="input-weight" min="0.05" max="0.5" step="0.01" value="0.15" oninput="updateVal('weight')">
+                    <p class="text-xs text-gray-400 mt-1">影響加速度 (F=ma) 及慣性</p>
+                </div>
+
+                <!-- 尾翼形狀 -->
+                <div>
+                    <label class="block text-sm font-bold text-gray-700 mb-2">
+                        <span>✈️ 尾翼形狀</span>
+                    </label>
+                    <select id="input-fin" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none bg-gray-50">
+                        <option value="none">無尾翼 (極不穩定，風阻大)</option>
+                        <option value="standard" selected>標準梯形尾翼 (穩定，一般風阻)</option>
+                        <option value="aero">流線型尾翼 (極穩定，風阻小)</option>
+                    </select>
+                    <p class="text-xs text-gray-400 mt-2">影響空氣阻力係數與飛行穩定度</p>
+                </div>
+
+                <hr class="border-gray-200">
+
+                <button onclick="launchRocket()" class="w-full bg-gradient-to-r from-blue-500 to-sky-500 hover:from-blue-600 hover:to-sky-600 text-white font-bold py-4 rounded-xl shadow-lg transform transition active:scale-95 flex items-center justify-center gap-2 text-lg">
+                    🚀 發射水火箭！
+                </button>
+            </div>
+
+            <!-- 科學原理 -->
+            <div id="content-theory" class="space-y-6 hidden">
+                <div class="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                    <h3 class="font-bold text-blue-800 text-lg mb-2 flex items-center gap-2">💨 水壓的影響</h3>
+                    <p class="text-sm text-gray-700 leading-relaxed">
+                        水壓是提供推力的主要來源。根據<b>波以耳定律</b>和<b>牛頓第三運動定律（作用力與反作用力）</b>，使用打氣筒增加瓶內氣壓時，壓力越高，將水向後噴出的力道就越大。這會產生更大的反作用力推動火箭前進，使其能飛得更高、更遠。
+                    </p>
+                </div>
+
+                <div class="bg-indigo-50 p-4 rounded-xl border border-indigo-100">
+                    <h3 class="font-bold text-indigo-800 text-lg mb-2 flex items-center gap-2">📐 發射角度的影響</h3>
+                    <p class="text-sm text-gray-700 leading-relaxed">
+                        角度決定了火箭的拋物線飛行軌跡。<br>
+                        • <b>90度 (垂直)：</b>所有的推力都用來對抗地心引力，能達到<b>最高高度</b>。<br>
+                        • <b>理論上 45度：</b>在真空中能達到最遠射程。但由於空氣阻力的存在，實際最佳的遠程發射角度通常略低，約在 <b>35度 到 40度</b> 之間。
+                    </p>
+                </div>
+
+                <div class="bg-cyan-50 p-4 rounded-xl border border-cyan-100">
+                    <h3 class="font-bold text-cyan-800 text-lg mb-2 flex items-center gap-2">💧 水量的影響</h3>
+                    <p class="text-sm text-gray-700 leading-relaxed">
+                        水扮演著「燃料（反應質量）」的角色。<br>
+                        • <b>水量太少：</b>氣體很快噴完，推進時間過短，總動能不足。<br>
+                        • <b>水量太多：</b>火箭整體太重（增加重量負荷），且留給壓縮空氣的空間變小，導致加速緩慢。<br>
+                        最佳的裝水量通常是瓶子總容積的 <b>1/3 左右 (約 30%~40%)</b>，能在推力時間與火箭重量間取得最佳平衡。
+                    </p>
+                </div>
+
+                <div class="bg-orange-50 p-4 rounded-xl border border-orange-100">
+                    <h3 class="font-bold text-orange-800 text-lg mb-2 flex items-center gap-2">⚖️ 機身重量的影響</h3>
+                    <p class="text-sm text-gray-700 leading-relaxed">
+                        根據<b>牛頓第二運動定律 (F=ma)</b>，在推力相同的情況下，較輕的火箭能獲得更大的加速度。然而，火箭若過於輕盈，其<b>慣性</b>會不足，發射後很容易受空氣阻力影響而迅速減速。適當的重量（通常在火箭頭部配重）有助於穩定重心，切開空氣保持動能。
+                    </p>
+                </div>
+
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <h3 class="font-bold text-slate-800 text-lg mb-2 flex items-center gap-2">✈️ 尾翼形狀的影響</h3>
+                    <p class="text-sm text-gray-700 leading-relaxed">
+                        尾翼的主要功能是控制飛行時的<b>空氣動力穩定性</b>並將重心移向火箭前方。<br>
+                        • <b>無尾翼：</b>火箭會在空中翻滾，產生巨大的空氣阻力，飛行距離極短。<br>
+                        • <b>流線型尾翼：</b>能有效降低風阻係數 (Cd 值)，減少空氣摩擦力，使火箭保持高速滑行，顯著增加射程。
+                    </p>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- 分享 QR Code Modal -->
+    <div id="share-modal" class="fixed inset-0 bg-black/60 z-50 hidden flex items-center justify-center backdrop-blur-sm p-4">
+        <div class="bg-white rounded-2xl p-6 md:p-8 max-w-sm w-full shadow-2xl transform transition-all flex flex-col items-center relative max-h-[90dvh] overflow-y-auto">
+            <button onclick="closeShareModal()" class="absolute top-3 right-3 md:top-4 md:right-4 text-gray-400 hover:text-gray-700 transition">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">分享模擬器</h3>
+            <p class="text-sm text-gray-500 mb-6 text-center">掃描下方 QR Code，在手機或其他設備上開啟此模擬器。</p>
+            <div id="qrcode" class="p-4 bg-white border-2 border-gray-100 rounded-xl shadow-inner mb-4"></div>
+            <p id="share-url" class="text-xs text-blue-500 break-all text-center select-all bg-blue-50 p-2 rounded-lg w-full"></p>
+        </div>
+    </div>
+
+    <script>
+        // --- UI 控制邏輯 ---
+        function updateVal(id) {
+            document.getElementById('val-' + id).innerText = document.getElementById('input-' + id).value;
+        }
+
+        function switchTab(tabId) {
+            const controlBtn = document.getElementById('tab-control');
+            const theoryBtn = document.getElementById('tab-theory');
+            const controlContent = document.getElementById('content-control');
+            const theoryContent = document.getElementById('content-theory');
+
+            if (tabId === 'control') {
+                controlBtn.classList.add('text-blue-600', 'border-b-2', 'border-blue-600', 'bg-blue-50/50');
+                controlBtn.classList.remove('text-gray-500', 'hover:bg-gray-50');
+                theoryBtn.classList.remove('text-blue-600', 'border-b-2', 'border-blue-600', 'bg-blue-50/50');
+                theoryBtn.classList.add('text-gray-500', 'hover:bg-gray-50');
+                
+                controlContent.classList.remove('hidden');
+                theoryContent.classList.add('hidden');
+            } else {
+                theoryBtn.classList.add('text-blue-600', 'border-b-2', 'border-blue-600', 'bg-blue-50/50');
+                theoryBtn.classList.remove('text-gray-500', 'hover:bg-gray-50');
+                controlBtn.classList.remove('text-blue-600', 'border-b-2', 'border-blue-600', 'bg-blue-50/50');
+                controlBtn.classList.add('text-gray-500', 'hover:bg-gray-50');
+                
+                theoryContent.classList.remove('hidden');
+                controlContent.classList.add('hidden');
+            }
+        }
+
+        // --- 物理引擎與畫布邏輯 ---
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+
+        // 畫布自適應大小
+        function resizeCanvas() {
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            if(!isFlying) drawScene(); // 重新繪製靜態場景
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // 物理常數與狀態
+        const GRAVITY = 9.81;
+        const AIR_DENSITY = 1.225; 
+        const BOTTLE_AREA = 0.006; // 假設瓶身截面積
+        const SCALE = 8; // 顯示比例：1公尺 = 8像素
+
+        let isFlying = false;
+        let animationId;
+        
+        // 火箭狀態物件
+        let rocket = {
+            x: 0, 
+            y: 0,
+            vx: 0,
+            vy: 0,
+            mass: 0.15,
+            cd: 0.3, // 風阻係數
+            angle: 0, // 顯示用角度
+            trail: []
+        };
+
+        let stats = {
+            maxHeight: 0,
+            maxDist: 0,
+            currHeight: 0,
+            currDist: 0
+        };
+
+        // 攝影機追蹤
+        let camera = { x: 0, y: 0 };
+
+        // 初始化與發射
+        function launchRocket() {
+            if(isFlying) return; // 正在飛則不動作
+
+            // 取得使用者設定
+            const pressure = parseFloat(document.getElementById('input-pressure').value);
+            const angleDeg = parseFloat(document.getElementById('input-angle').value);
+            const waterVol = parseFloat(document.getElementById('input-water').value);
+            const weight = parseFloat(document.getElementById('input-weight').value);
+            const finType = document.getElementById('input-fin').value;
+
+            // --- 簡化的水火箭物理推算模型 ---
+            // 1L 水 = 1kg
+            let waterMass = waterVol; 
+            rocket.mass = weight + waterMass; // 發射瞬間總質量
+
+            // 決定風阻係數 Cd
+            if(finType === 'none') rocket.cd = 0.8;       // 不穩定，阻力大
+            else if(finType === 'standard') rocket.cd = 0.3; // 一般
+            else if(finType === 'aero') rocket.cd = 0.15;    // 流線型
+
+            // 水量效率曲線 (假設2L寶特瓶，0.6~0.7L效率最高)
+            // 公式：效率 = 1 - (水量 - 0.6)^2 * 1.5
+            let efficiency = Math.max(0.1, 1 - Math.pow(waterVol - 0.6, 2) * 1.5);
+            
+            // 計算總能量 (以氣壓為基準，乘上效率)
+            // 加入配重影響：太輕的話慣性極差(這裡簡化，將初速公式調整)
+            let totalEnergy = pressure * 15 * efficiency; 
+
+            // 初速度 V = sqrt(2E/m)
+            // 為了模擬效果，做適度放大
+            let v0 = Math.sqrt((2 * totalEnergy) / rocket.mass) * 1.5; 
+
+            // 防止數據極端
+            if(isNaN(v0) || v0 < 0) v0 = 0;
+
+            // 轉換角度為弧度
+            let angleRad = angleDeg * Math.PI / 180;
+
+            // 初始化火箭發射狀態
+            rocket.x = 0;
+            rocket.y = 0;
+            rocket.vx = v0 * Math.cos(angleRad);
+            rocket.vy = v0 * Math.sin(angleRad);
+            rocket.angle = angleRad;
+            rocket.trail = [];
+            
+            // 由於水很快噴完，我們將發射後的質量快速設為空機質量，以便計算後續阻力
+            // 這裡簡化處理：直接使用空機重量計算飛行過程中的重力與慣性
+            rocket.mass = weight; 
+
+            stats.maxHeight = 0;
+            stats.maxDist = 0;
+            camera.x = 0;
+            camera.y = 0;
+            
+            document.getElementById('flight-status').innerText = "飛行中 🚀";
+            document.getElementById('flight-status').className = "font-semibold text-blue-600 animate-pulse";
+
+            isFlying = true;
+            lastTime = performance.now();
+            requestAnimationFrame(updateLoop);
+        }
+
+        let lastTime = 0;
+
+        // 物理更新循環
+        function updateLoop(timestamp) {
+            if(!isFlying) return;
+
+            let dt = (timestamp - lastTime) / 1000; // 轉為秒
+            lastTime = timestamp;
+
+            // 限制最大 dt 防止卡頓導致穿牆
+            if(dt > 0.05) dt = 0.05; 
+
+            // 空氣阻力計算 Fd = 0.5 * rho * v^2 * Cd * A
+            let speedSq = rocket.vx * rocket.vx + rocket.vy * rocket.vy;
+            let speed = Math.sqrt(speedSq);
+            
+            let fd = 0.5 * AIR_DENSITY * speedSq * rocket.cd * BOTTLE_AREA;
+            
+            // 阻力加速度 a_drag = Fd / m
+            let a_drag = fd / rocket.mass;
+
+            // 加速度分量
+            let ax = 0;
+            let ay = -GRAVITY;
+
+            if (speed > 0) {
+                ax -= a_drag * (rocket.vx / speed);
+                ay -= a_drag * (rocket.vy / speed);
+            }
+
+            // 無尾翼的額外翻滾懲罰：速度會快速流失 (模擬亂流)
+            if(document.getElementById('input-fin').value === 'none') {
+                 ax *= 1.1;
+                 ay -= 1.5; // 額外下墜力
+            }
+
+            // 積分更新速度與位置
+            rocket.vx += ax * dt;
+            rocket.vy += ay * dt;
+            rocket.x += rocket.vx * dt;
+            rocket.y += rocket.vy * dt;
+
+            // 計算旋轉角度
+            rocket.angle = Math.atan2(rocket.vy, rocket.vx);
+
+            // 記錄軌跡
+            if (Math.random() > 0.5) { // 稍微降低軌跡點密度
+                rocket.trail.push({x: rocket.x, y: rocket.y});
+            }
+
+            // 更新統計數據
+            if (rocket.y > stats.maxHeight) stats.maxHeight = rocket.y;
+            if (rocket.x > stats.maxDist) stats.maxDist = rocket.x;
+            
+            stats.currHeight = rocket.y;
+            stats.currDist = rocket.x;
+
+            updateUI();
+
+            // 攝影機跟隨
+            updateCamera();
+
+            // 繪製
+            drawScene();
+
+            // 著陸判定
+            if (rocket.y <= 0 && rocket.vy < 0) {
+                isFlying = false;
+                rocket.y = 0;
+                rocket.vy = 0;
+                rocket.vx = 0;
+                stats.currHeight = 0;
+                updateUI();
+                document.getElementById('flight-status').innerText = "已著陸 🎯";
+                document.getElementById('flight-status').className = "font-semibold text-red-600";
+                drawScene(); // 畫最後一幀
+            } else {
+                animationId = requestAnimationFrame(updateLoop);
+            }
+        }
+
+        function updateUI() {
+            document.getElementById('curr-height').innerText = Math.max(0, stats.currHeight).toFixed(1);
+            document.getElementById('curr-dist').innerText = Math.max(0, stats.currDist).toFixed(1);
+            document.getElementById('max-height').innerText = stats.maxHeight.toFixed(1);
+            document.getElementById('max-dist').innerText = stats.maxDist.toFixed(1);
+        }
+
+        function updateCamera() {
+            const marginX = canvas.width * 0.3;
+            const marginY = canvas.height * 0.4;
+            
+            // 轉換為像素坐標
+            let pxX = rocket.x * SCALE;
+            let pxY = rocket.y * SCALE;
+
+            // 讓火箭保持在畫面中右側
+            if (pxX > camera.x + canvas.width - marginX) {
+                camera.x = pxX - canvas.width + marginX;
+            }
+            // 向上追蹤
+            if (pxY > camera.y + canvas.height - marginY) {
+                camera.y = pxY - canvas.height + marginY;
+            }
+            // 向下追蹤 (著陸時)
+            if (pxY < camera.y + marginY * 0.5 && camera.y > 0) {
+                camera.y = Math.max(0, pxY - marginY * 0.5);
+            }
+        }
+
+        // --- 繪圖邏輯 ---
+        function drawScene() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 畫天空背景 (漸層)
+            let skyGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+            skyGrad.addColorStop(0, "#7dd3fc"); // 淺藍
+            skyGrad.addColorStop(1, "#e0f2fe"); // 極淺藍
+            ctx.fillStyle = skyGrad;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // 原點在左下角，往上為y正向
+            const groundLevelY = canvas.height - 40; 
+            
+            // 轉換物理座標到畫布座標的輔助函數
+            function toScreenX(x) { return x * SCALE - camera.x + 50; } // +50 是發射台起始偏移
+            function toScreenY(y) { return groundLevelY - (y * SCALE - camera.y); }
+
+            // 1. 畫網格與標尺 (背景)
+            ctx.strokeStyle = "rgba(255,255,255,0.4)";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            let startMeterX = Math.floor(camera.x / SCALE / 10) * 10; // 每10公尺一條線
+            for(let m = startMeterX; m < startMeterX + (canvas.width/SCALE) + 20; m+=10) {
+                let px = toScreenX(m);
+                ctx.moveTo(px, 0);
+                ctx.lineTo(px, groundLevelY);
+                // 標記數字
+                if(m % 50 === 0 && m > 0) {
+                    ctx.fillStyle = "rgba(2, 132, 199, 0.5)";
+                    ctx.font = "12px sans-serif";
+                    ctx.fillText(m + "m", px + 2, groundLevelY - 5);
+                }
+            }
+            ctx.stroke();
+
+            // 2. 畫軌跡
+            if (rocket.trail.length > 0) {
+                ctx.beginPath();
+                ctx.strokeStyle = "rgba(239, 68, 68, 0.5)"; // 紅色軌跡半透明
+                ctx.lineWidth = 3;
+                ctx.lineCap = "round";
+                ctx.lineJoin = "round";
+                ctx.moveTo(toScreenX(rocket.trail[0].x), toScreenY(rocket.trail[0].y));
+                for(let i=1; i<rocket.trail.length; i++) {
+                    ctx.lineTo(toScreenX(rocket.trail[i].x), toScreenY(rocket.trail[i].y));
+                }
+                ctx.lineTo(toScreenX(rocket.x), toScreenY(rocket.y)); // 連接到當前位置
+                ctx.stroke();
+            }
+
+            // 3. 畫發射台
+            let padX = toScreenX(0);
+            let padY = toScreenY(0);
+            ctx.fillStyle = "#475569";
+            ctx.fillRect(padX - 15, padY, 30, 10); // 底座
+            ctx.fillStyle = "#94a3b8";
+            ctx.fillRect(padX - 2, padY - 20, 4, 20); // 支架
+
+            // 4. 畫火箭
+            let rX = toScreenX(rocket.x);
+            let rY = toScreenY(rocket.y);
+            
+            ctx.save();
+            ctx.translate(rX, rY);
+            // 將物理角度(逆時針為正)轉為 Canvas 角度(順時針為正)
+            ctx.rotate(-rocket.angle); 
+
+            // 繪製水火箭實體
+            const finType = document.getElementById('input-fin').value;
+            
+            // 噴嘴/推力視覺特效 (上升階段)
+            if (isFlying && rocket.vy > 0 && rocket.y < 10) {
+                ctx.fillStyle = "rgba(186, 230, 253, 0.8)"; // 水花顏色
+                ctx.beginPath();
+                ctx.moveTo(-15, 0);
+                ctx.lineTo(-40, 5 + Math.random()*5);
+                ctx.lineTo(-40, -5 - Math.random()*5);
+                ctx.fill();
+            }
+
+            // 瓶身 (1.5L~2L 寶特瓶比例)
+            ctx.fillStyle = "#cbd5e1"; // 塑膠灰白
+            ctx.fillRect(-10, -5, 20, 10);
+            
+            // 水的顏色 (如果在發射初期)
+            if(!isFlying || (isFlying && rocket.y < 5)) {
+                 ctx.fillStyle = "#0ea5e9";
+                 ctx.fillRect(-10, -5, 8, 10);
+            }
+
+            // 頭錐
+            ctx.fillStyle = "#ef4444"; // 紅色頭錐
+            ctx.beginPath();
+            ctx.moveTo(10, -5);
+            ctx.lineTo(20, 0);
+            ctx.lineTo(10, 5);
+            ctx.fill();
+
+            // 尾翼
+            ctx.fillStyle = "#3b82f6"; // 藍色尾翼
+            if (finType === 'standard') {
+                // 標準梯形
+                ctx.beginPath();
+                ctx.moveTo(-5, -5); ctx.lineTo(-10, -12); ctx.lineTo(-15, -12); ctx.lineTo(-10, -5); ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(-5, 5); ctx.lineTo(-10, 12); ctx.lineTo(-15, 12); ctx.lineTo(-10, 5); ctx.fill();
+            } else if (finType === 'aero') {
+                // 流線型後掠翼
+                ctx.beginPath();
+                ctx.moveTo(0, -5); ctx.lineTo(-12, -10); ctx.lineTo(-10, -5); ctx.fill();
+                ctx.beginPath();
+                ctx.moveTo(0, 5); ctx.lineTo(-12, 10); ctx.lineTo(-10, 5); ctx.fill();
+            } else {
+                // 無尾翼 (不畫，或者畫個破爛的)
+            }
+
+            ctx.restore();
+
+            // 5. 畫地面
+            ctx.fillStyle = "#22c55e"; // 綠地
+            ctx.fillRect(0, groundLevelY, canvas.width, canvas.height - groundLevelY);
+            ctx.fillStyle = "#166534"; // 地板邊緣
+            ctx.fillRect(0, groundLevelY, canvas.width, 4);
+        }
+
+        // --- QR Code 分享邏輯 ---
+        let qrcode = null;
+
+        function showShareModal() {
+            const modal = document.getElementById('share-modal');
+            const urlDisplay = document.getElementById('share-url');
+            
+            // 取得目前的網址
+            const currentUrl = window.location.href;
+            
+            modal.classList.remove('hidden');
+            urlDisplay.innerText = currentUrl;
+
+            // 清空並重新生成 QR Code
+            const qrContainer = document.getElementById('qrcode');
+            qrContainer.innerHTML = '';
+            
+            qrcode = new QRCode(qrContainer, {
+                text: currentUrl,
+                width: 200,
+                height: 200,
+                colorDark : "#0f172a",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.H
+            });
+        }
+
+        function closeShareModal() {
+            document.getElementById('share-modal').classList.add('hidden');
+        }
+
+        // 初始化
+        resizeCanvas();
+
+    </script>
+</body>
+</html>
